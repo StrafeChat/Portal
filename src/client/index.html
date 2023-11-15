@@ -1,0 +1,22 @@
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Portal test frontend</title>
+    </head>
+    <body>
+
+        <script>
+        const ws = new WebSocket("ws://localhost:3000/ws");
+        ws.onopen = () => {
+            console.log("connected");
+            ws.send(JSON.stringify({
+                op: 1,
+            }));
+        }
+        ws.onmessage = (m) => {
+            console.log(m.data);
+        }
+        </script>
+    </body>
+</html>

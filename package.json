@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "werift-webrtc": "^0.0.6",
+    "ws": "^8.14.2"
+  }
+}
