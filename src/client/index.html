@@ -6,17 +6,91 @@
     </head>
     <body>
 
+        <p>local video</p>
+
+        <video autoplay id="local" style="height: 75px; width: 75px;" muted></video>
+
+        <p>remote video</p>
+
+        <video autoplay id="remote" style="height: 75px; width: 75px;">
+
+        </video>
+
         <script>
-        const ws = new WebSocket("ws://localhost:3000/ws");
-        ws.onopen = () => {
-            console.log("connected");
-            ws.send(JSON.stringify({
-                op: 1,
-            }));
-        }
-        ws.onmessage = (m) => {
-            console.log(m.data);
-        }
+        (async () => {
+            const local = document.getElementById("local");
+            const remote = document.getElementById("remote");
+            var peer;
+            var initiated = false;
+
+            const ws = new WebSocket("ws://localhost:3000/ws");
+            ws.onopen = () => {
+                console.log("connected");
+                ws.send(JSON.stringify({
+                    op: 1,
+                }));
+            }
+            var offer = null;
+            ws.onmessage = async (m) => {
+                console.log(m.data);
+                m = JSON.parse(m.data);
+                switch (m.op) {
+                    case 10: // SDP
+                        offer = JSON.parse(m.data);
+
+                        console.log("offer")
+
+                        if (!initiated) await init();
+
+                        await peer.setRemoteDescription(offer);
+                        const answer = await peer.createAnswer();
+                        await peer.setLocalDescription(answer);
+
+                        break;
+                }
+            }
+
+            const init = async () => {
+                initiated = true;
+                peer = new RTCPeerConnection({});
+                peer.onicecandidate = ({ candidate }) => {
+                    //console.log("icecandidate", candidate);
+                    if (!candidate) {
+                        const sdp = peer.localDescription;
+                        console.log("local description: ", sdp);
+                        ws.send(JSON.stringify({ op: 10, data: sdp }));
+                    }
+                }
+                peer.oniceconnectionstatechange = () => {
+                    console.log("iceconstatechange", peer.iceConnectionState);
+                }
+
+                const remoteStreams = []
+                peer.ontrack = (e) => {
+                    console.log("ontrack", e);
+                    const streams = e;
+                    remoteStreams.push(streams);
+                    if (remoteStreams.length < 2) return;
+                    const remoteStream = new MediaStream(remoteStreams.flat().map(stream => stream.track));
+                    console.log(remoteStream)
+                    remote.srcObject = remoteStream;
+                    remote.play();
+                }
+
+                const localStream = await navigator.mediaDevices.getUserMedia({
+                    video: true,
+                    audio: true,
+                });
+                const track = localStream.getVideoTracks()[0];
+                console.log("local track", track);
+                peer.addTrack(track, localStream);
+                const audio = localStream.getAudioTracks()[0];
+                peer.addTrack(audio, localStream);
+                local.srcObject = localStream;
+                //console.log(localStream)
+                local.play();
+            }
+        })()
         </script>
     </body>
 </html>
