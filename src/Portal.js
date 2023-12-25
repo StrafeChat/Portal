@@ -4,12 +4,15 @@ const ws = require("ws");
 const OP = require("./enum/OP.js");
 const EventEmitter = require("events");
 
-const { RTCPeerConnection, RTCSessionDescription, useSdesMid, useAbsSendTime } = require("werift");
+// TODO: refactor
+const { VoiceCall } = require("./Room.js");
 
 class Socket extends EventEmitter {
   socket = null;
   authenticated = false;
 
+  userId = null;
+  username = null;
   constructor(wsSocket) {
     super();
 
@@ -26,13 +29,16 @@ class Socket extends EventEmitter {
     }
 
     if (!this.authenticated && message.op !== OP.AUTH) {
-      // handle authentication
+      // TODO: handle authentication
+      // TODO: get user information
       this.authenticated = true;
 
       // When AUTHENTICATED:
       this.emit("ready");
       // TODO: auth return;
     }
+
+    // TODO: implement id system to identify "conversations"
 
     switch(message.op) {
       case OP.PING:
@@ -41,16 +47,38 @@ class Socket extends EventEmitter {
       case OP.SDP:
         this.emit("sdp", message.data);
         break;
+      case OP.INFO:
+        // TODO: verify data and syntax
+        this.emit("connectInfo", message.data);
+        break;
+      case OP.CONNECTION:
+        // TODO: verify
+        this.emit("connection", message.data);
+        break;
     }
       // handle messages
     }
 
-    sendSdp(sdp) {
-      this.socket.send(JSON.stringify({ op: OP.SDP, data: sdp }));
+    sendSdp(sdp, id) {
+      this.socket.send(JSON.stringify({ op: OP.SDP, data: sdp, id }));
     };
+
+    prepareConnection(id) {
+      return new Promise((res, _rej) => {
+        // TODO: implement rejection
+        this.socket.send(JSON.stringify({ op: OP.CONNECTION, data: id }));
+        const listener = (data) => {
+          if (data !== id) return;
+          this.removeListener("connection", listener);
+          res();
+        }
+        this.on("connection", listener);
+      })
+    }
 }
 
 class Portal {
+  rooms = [];
   constructor() {
     const server = http.createServer((req, res) => {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -66,13 +94,31 @@ class Portal {
 
   handleSocket(socket) {
     const s = new Socket(socket);
+    s.userId = "origin";
+    s.username = "Jameson";
 
-    s.on("ready", async () => {
+    s.on("connectInfo", (data) => {
+      const channelId = data.channelId; // TODO: verify
+      var call = this.rooms.find((room) => room.channelId === channelId);
+      if (!call) {
+        call = new VoiceCall(channelId);
+        this.rooms.push(call);
+
+        console.log("channel created", call);
+
+        return call.initiate(s);
+      }
+
+      console.log("joining channel");
+      call.join(s);
+    });
+
+    /*s.on("ready", async () => {
       const pc = new RTCPeerConnection({
         /*headerExtensions: {
           video: [useSdesMid(), useAbsSendTime()],
         }*/
-      });
+     /* });
       pc.iceConnectionStateChange.subscribe((state) => {
         console.log("iceconstatechange", state);
       });
@@ -102,7 +148,7 @@ class Portal {
         console.log("sdp")
         pc.setRemoteDescription(sdp);
       });
-    });
+    });*/
   }
 }
 

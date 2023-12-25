@@ -1,96 +1,190 @@
 <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Portal test frontend</title>
-    </head>
-    <body>
 
-        <p>local video</p>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Portal test frontend</title>
+</head>
 
-        <video autoplay id="local" style="height: 75px; width: 75px;" muted></video>
+<body>
+  <p>local video</p>
+  <video autoplay id="local" style="height: 75px; width: 75px;" muted></video>
+  <p>remote video</p>
+  <div id="remote">
+  </div>
+  <script>
+    (async () => {
+      const local = document.getElementById("local");
+      const remoteCon = document.getElementById("remote");
 
-        <p>remote video</p>
+      const peers = {};
+      var localStream = null;
 
-        <video autoplay id="remote" style="height: 75px; width: 75px;">
+      const createPeer = async (id, ws) => {
+        const peer = new RTCPeerConnection({});
+        peer.onicecandidate = ({ candidate }) => {
+          //console.log("icecandidate", candidate);
+          if (!candidate) {
+            const sdp = peer.localDescription;
+            console.log("local description: ", sdp);
+            ws.send(JSON.stringify({ op: 10, data: sdp }));
+          }
+        }
+        peer.oniceconnectionstatechange = () => {
+          console.log("iceconstatechange", peer.iceConnectionState);
+        }
 
-        </video>
+        const remote = document.createElement("video");
+        remoteCon.appendChild(remote);
 
-        <script>
-        (async () => {
-            const local = document.getElementById("local");
-            const remote = document.getElementById("remote");
-            var peer;
-            var initiated = false;
+        const remoteStreams = [];
+        peer.ontrack = (e) => {
+          console.log("ontrack", e);
+          const streams = e;
+          remoteStreams.push(streams);
+          if (remoteStreams.length < 2) return;
+          const remoteStream = new MediaStream(remoteStreams.flat().map(stream => stream.track));
+          console.log(remoteStream)
+          remote.srcObject = remoteStream;
+          remote.play();
+        }
 
-            const ws = new WebSocket("ws://localhost:3000/ws");
-            ws.onopen = () => {
-                console.log("connected");
-                ws.send(JSON.stringify({
-                    op: 1,
-                }));
+        peers[id] = peer;
+      }
+
+      const call = async (id = "test") => {
+        try {
+          localStream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: true,
+          });
+        } catch (e) {
+          console.log(e);
+          return;
+        }
+        local.srcObject = localStream;
+        local.play();
+
+        const ws = new WebSocket("ws://" + window.location.host + "/ws");
+        ws.onopen = () => {
+          console.log("connected");
+
+          ws.send(JSON.stringify({
+            op: 20,
+            data: {
+              channelId: id
             }
-            var offer = null;
-            ws.onmessage = async (m) => {
-                console.log(m.data);
-                m = JSON.parse(m.data);
-                switch (m.op) {
-                    case 10: // SDP
-                        offer = JSON.parse(m.data);
+          }));
+        }
 
-                        console.log("offer")
+        ws.onmessage = async (m) => {
+          console.log(m.data);
+          m = JSON.parse(m.data);
+          switch (m.op) {
+            case 10: // SDP
+              offer = JSON.parse(m.data);
 
-                        if (!initiated) await init();
+              console.log(m, m.id);
+              var peer = peers[m.id];
+              await peer.setRemoteDescription(offer);
+              const answer = await peer.createAnswer();
+              await peer.setLocalDescription(answer);
 
-                        await peer.setRemoteDescription(offer);
-                        const answer = await peer.createAnswer();
-                        await peer.setLocalDescription(answer);
+              break;
+            case 15: // prepare connection
+              console.log("prepare");
+              createPeer(m.data, ws);
 
-                        break;
-                }
-            }
+              ws.send(JSON.stringify({ // answer to resume setup
+                op: 15,
+                data: m.data
+              }));
 
-            const init = async () => {
-                initiated = true;
-                peer = new RTCPeerConnection({});
-                peer.onicecandidate = ({ candidate }) => {
-                    //console.log("icecandidate", candidate);
-                    if (!candidate) {
-                        const sdp = peer.localDescription;
-                        console.log("local description: ", sdp);
-                        ws.send(JSON.stringify({ op: 10, data: sdp }));
-                    }
-                }
-                peer.oniceconnectionstatechange = () => {
-                    console.log("iceconstatechange", peer.iceConnectionState);
-                }
+              break;
+          }
+        }
+      }
 
-                const remoteStreams = []
-                peer.ontrack = (e) => {
-                    console.log("ontrack", e);
-                    const streams = e;
-                    remoteStreams.push(streams);
-                    if (remoteStreams.length < 2) return;
-                    const remoteStream = new MediaStream(remoteStreams.flat().map(stream => stream.track));
-                    console.log(remoteStream)
-                    remote.srcObject = remoteStream;
-                    remote.play();
-                }
+      call();
+    })();
 
-                const localStream = await navigator.mediaDevices.getUserMedia({
-                    video: true,
-                    audio: true,
-                });
-                const track = localStream.getVideoTracks()[0];
-                console.log("local track", track);
-                peer.addTrack(track, localStream);
-                const audio = localStream.getAudioTracks()[0];
-                peer.addTrack(audio, localStream);
-                local.srcObject = localStream;
-                //console.log(localStream)
-                local.play();
-            }
-        })()
-        </script>
-    </body>
+  </script>
+  <script>
+    (async () => {
+      const local = document.getElementById("local");
+      const remote = document.getElementById("remote");
+      var peer;
+      var initiated = false;
+
+      const ws = new WebSocket("ws://localhost:3000/ws");
+      ws.onopen = () => {
+        console.log("connected");
+        ws.send(JSON.stringify({
+          op: 1,
+        }));
+      }
+      var offer = null;
+      ws.onmessage = async (m) => {
+        console.log(m.data);
+        m = JSON.parse(m.data);
+        switch (m.op) {
+          case 10: // SDP
+            offer = JSON.parse(m.data);
+
+            console.log("offer")
+
+            if (!initiated) await init();
+
+            await peer.setRemoteDescription(offer);
+            const answer = await peer.createAnswer();
+            await peer.setLocalDescription(answer);
+
+            break;
+        }
+      }
+
+      const init = async () => {
+        initiated = true;
+        peer = new RTCPeerConnection({});
+        peer.onicecandidate = ({ candidate }) => {
+          //console.log("icecandidate", candidate);
+          if (!candidate) {
+            const sdp = peer.localDescription;
+            console.log("local description: ", sdp);
+            ws.send(JSON.stringify({ op: 10, data: sdp }));
+          }
+        }
+        peer.oniceconnectionstatechange = () => {
+          console.log("iceconstatechange", peer.iceConnectionState);
+        }
+
+        const remoteStreams = []
+        peer.ontrack = (e) => {
+          console.log("ontrack", e);
+          const streams = e;
+          remoteStreams.push(streams);
+          if (remoteStreams.length < 2) return;
+          const remoteStream = new MediaStream(remoteStreams.flat().map(stream => stream.track));
+          console.log(remoteStream)
+          remote.srcObject = remoteStream;
+          remote.play();
+        }
+
+        const localStream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: true,
+        });
+        const track = localStream.getVideoTracks()[0];
+        console.log("local track", track);
+        peer.addTrack(track, localStream);
+        const audio = localStream.getAudioTracks()[0];
+        peer.addTrack(audio, localStream);
+        local.srcObject = localStream;
+        //console.log(localStream)
+        local.play();
+      }
+    })
+  </script>
+</body>
+
 </html>
