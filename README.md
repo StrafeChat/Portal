@@ -1,2 +1,0 @@
-# Portal
-WebRTC Voice Server
